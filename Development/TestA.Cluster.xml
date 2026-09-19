@@ -1,0 +1,181 @@
+<ManagementPack ContentReadable="true" SchemaVersion="2.0" OriginalSchemaVersion="1.1" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <Manifest>
+    <Identity>
+      <ID>TestACluster</ID>
+      <Version>2026.9.19.2</Version>
+    </Identity>
+    <Name>TestA.Cluster</Name>
+    <References>
+      <Reference Alias="SystemCenter">
+        <ID>Microsoft.SystemCenter.Library</ID>
+        <Version>10.22.10118.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="ClusterLibrary">
+        <ID>Microsoft.Windows.Cluster.Management.Library</ID>
+        <Version>10.1.0.0</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Health">
+        <ID>System.Health.Library</ID>
+        <Version>7.0.8447.6</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+      <Reference Alias="Windows">
+        <ID>Microsoft.Windows.Library</ID>
+        <Version>7.5.8501.1</Version>
+        <PublicKeyToken>31bf3856ad364e35</PublicKeyToken>
+      </Reference>
+    </References>
+  </Manifest>
+  <Monitoring>
+    <Monitors>
+      <UnitMonitor ID="Company.AppName.Identifier.Monitor" Accessibility="Public" Enabled="true" Target="ClusterLibrary!Microsoft.Windows.Cluster.Node" ParentMonitorID="Health!System.Health.AvailabilityState" Remotable="true" Priority="Normal" TypeID="Windows!Microsoft.Windows.TimedScript.ThreeStateMonitorType" ConfirmDelivery="false">
+        <Category>Custom</Category>
+        <AlertSettings AlertMessage="Company.AppName.Identifier.Monitor.AlertMessage">
+          <AlertOnState>Warning</AlertOnState>  <!-- Warning or Error should match OperationalStates below  -->
+          <AutoResolve>true</AutoResolve>
+          <AlertPriority>Normal</AlertPriority>
+          <AlertSeverity>MatchMonitorHealth</AlertSeverity>  <!-- Common options for AlertSeverity are MatchMonitorHealth, Information, Warning, Error -->
+          <AlertParameters>
+            <AlertParameter1>$Target/Property[Type="Windows!Microsoft.Windows.Computer"]/NetworkName$</AlertParameter1>
+            <AlertParameter2>$Target/Property[Type="ClusterLibrary!Microsoft.Windows.Cluster.Node"]/NodeName$</AlertParameter2>
+            <AlertParameter3>$Target/Property[Type="ClusterLibrary!Microsoft.Windows.Cluster.Node"]/ClusterName$</AlertParameter3>
+          </AlertParameters>
+        </AlertSettings>
+        <OperationalStates>
+          <OperationalState ID="GoodCondition" MonitorTypeStateID="Success" HealthState="Success" />
+          <OperationalState ID="WarningCondition" MonitorTypeStateID="Warning" HealthState="Warning" />  <!-- HealthState = Warning or Error -->
+          <OperationalState ID="BadCondition" MonitorTypeStateID="Error" HealthState="Error" />  <!-- HealthState = Warning or Error -->
+          </OperationalStates>
+        <Configuration>
+          <IntervalSeconds>10</IntervalSeconds>
+          <SyncTime />
+          <ScriptName>Company.AppName.Identifier.Monitor.vbs</ScriptName>
+          <Arguments></Arguments>
+          <ScriptBody><![CDATA[
+' Codes
+'-1 ClusterNodeStateUnknown
+'0 ClusterNodeUpUp
+'1 ClusterNodeDownDown
+'2 ClusterNodePausedPaused
+'3 ClusterNodeJoining
+' If it can't get a number something is wrong.
+
+' Need to add a property bag that contains the result of the script which will show up in the alert description.
+' Do we make it 2 or 3 state monitor. It'S either healthy or there's a problem with the cluster node. Teams don't care about warning - IT'S THAT SIMPLE.
+' Logic is if the script is failing there's a very good chance there's a problem with the node.
+On Error Resume Next
+Dim oAPI, oBag, objWMIService, objWMICluster, colComputer, colNodes, objItem, objNode, State
+Set oAPI = CreateObject("MOM.ScriptAPI")
+Set oBag = oAPI.CreatePropertyBag()
+Set objWMIService=GetObject("winmgmts:\\.\root\cimv2")
+Set objWMICluster=GetObject("winmgmts:\\.\root\MSCluster")
+Set colComputer=objWMIService.ExecQuery("SELECT Name FROM Win32_ComputerSystem")
+Set colNodes=objWMICluster.ExecQuery("SELECT Name, State FROM MSCluster_Node")
+For Each objItem in colComputer
+    ComputerName=objItem.Name
+    CheckError
+Next
+For Each objNode in colNodes
+  NodeName=objNode.Name
+  CheckError
+  NodeState=objNode.State
+  CheckError
+  If ComputerName = NodeName Then
+    ' if you're in this bit it means the cluster query is working.
+    if NodeState = 0 then
+      State="UP"
+      Call oBag.AddValue("Result","GoodCondition")
+    elseif NodeState = 1 then
+      State="DOWN"
+      Call oBag.AddValue("Result","BadCondition")
+    Else 
+    STATE="WARNING"
+    Call oBag.AddValue("Result","WarningCondition")
+    End If
+  End If
+Next
+Sub CheckError
+  IF err.number <> 0 then
+    STATE="WARNING"
+    Call oBag.AddValue("Result","WarningCondition")
+    Err.Clear
+  end if
+end sub
+oAPI.Return(oBag)
+]]></ScriptBody>
+          <TimeoutSeconds>60</TimeoutSeconds>
+          <ErrorExpression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery Type="String">Property[@Name='Result']</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="String">BadCondition</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </ErrorExpression>
+          <WarningExpression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery Type="String">Property[@Name='Result']</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="String">WarningCondition</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </WarningExpression>
+          <SuccessExpression>
+            <SimpleExpression>
+              <ValueExpression>
+                <XPathQuery Type="String">Property[@Name='Result']</XPathQuery>
+              </ValueExpression>
+              <Operator>Equal</Operator>
+              <ValueExpression>
+                <Value Type="String">GoodCondition</Value>
+              </ValueExpression>
+            </SimpleExpression>
+          </SuccessExpression>
+        </Configuration>
+      </UnitMonitor>
+    </Monitors>
+  </Monitoring>	
+  <Presentation>
+    <StringResources>
+      <StringResource ID="Company.AppName.Identifier.Monitor.AlertMessage" />
+    </StringResources>
+  </Presentation>
+  <LanguagePacks>
+    <LanguagePack ID="ENU" IsDefault="false">
+      <DisplayStrings>
+        <DisplayString ElementID="TestACluster">
+          <Name>TestA.Cluster</Name>
+          <Description />
+        </DisplayString>
+        <DisplayString ElementID="Company.AppName.Identifier.Monitor">
+          <Name>Company AppName Identifier Monitor</Name>
+        </DisplayString>
+        <DisplayString ElementID="Company.AppName.Identifier.Monitor" SubElementID="GoodCondition">
+          <Name>Good Condition</Name>
+        </DisplayString>
+        <DisplayString ElementID="Company.AppName.Identifier.Monitor" SubElementID="WarningCondition">
+          <Name>Warning Condition</Name>
+        </DisplayString>
+        <DisplayString ElementID="Company.AppName.Identifier.Monitor" SubElementID="BadCondition">
+          <Name>Bad Condition</Name>
+        </DisplayString>
+        <DisplayString ElementID="Company.AppName.Identifier.Monitor.AlertMessage">
+          <Name>A bad condition was found after running the VBScript monitor</Name>
+          <Description>A bad condition was found after running the VBScript monitor
+Comp name: {0}
+NNode name: {1}
+Cluster name: {2}
+</Description>
+        </DisplayString>
+      </DisplayStrings>
+    </LanguagePack>
+  </LanguagePacks>
+</ManagementPack>
